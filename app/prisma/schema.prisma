@@ -1,0 +1,163 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Organization {
+  id        String   @id @default(uuid())
+  name      String
+  kraPin    String?  @map("kra_pin")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  memberships Membership[]
+  paymentIntents PaymentIntent[]
+  paymentAttempts PaymentAttempt[]
+  providers     PaymentProvider[]
+  ledgerEntries LedgerEntry[]
+  auditEvents   AuditEvent[]
+  apiKeys       ApiKey[]
+  @@map("organizations")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  name      String?
+  createdAt DateTime @default(now()) @map("created_at")
+  memberships Membership[]
+  @@map("users")
+}
+
+model Membership {
+  id             String   @id @default(uuid())
+  user           User     @relation(fields: [userId], references: [id])
+  userId         String   @map("user_id")
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  organizationId String   @map("organization_id")
+  role           Role     @default(MEMBER)
+  createdAt      DateTime @default(now()) @map("created_at")
+  @@unique([userId, organizationId])
+  @@map("memberships")
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+/** Licensed PSP partner connection (adapter-backed). */
+model PaymentProvider {
+  id             String   @id @default(uuid())
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  organizationId String   @map("organization_id")
+  code           String   // mpesa-daraja | dpo | pesapal | stripe | bank-partner
+  label          String
+  configEncrypted String @map("config_encrypted")
+  enabled        Boolean  @default(true)
+  priority        Int     @default(100)
+  createdAt      DateTime @default(now()) @map("created_at")
+  attempts        PaymentAttempt[]
+  @@unique([organizationId, code])
+  @@map("payment_providers")
+}
+
+model PaymentIntent {
+  id             String   @id @default(uuid())
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  organizationId String   @map("organization_id")
+  amountCents    Int      @map("amount_cents")
+  currency       String   @default("KES")
+  purpose        String
+  reference      String   // external ref (invoice #, order #)
+  idempotencyKey String   @map("idempotency_key")
+  status         PaymentIntentStatus @default(PENDING)
+  createdAt      DateTime @default(now()) @map("created_at")
+  attempts       PaymentAttempt[]
+  @@unique([organizationId, idempotencyKey])
+  @@index([organizationId, status])
+  @@map("payment_intents")
+}
+
+enum PaymentIntentStatus {
+  PENDING
+  REQUIRES_ACTION
+  SUCCEEDED
+  FAILED
+  REFUNDED
+  DISPUTED
+}
+
+model PaymentAttempt {
+  id             String   @id @default(uuid())
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  organizationId String   @map("organization_id")
+  intent         PaymentIntent @relation(fields: [paymentIntentId], references: [id])
+  paymentIntentId String  @map("payment_intent_id")
+  provider       PaymentProvider @relation(fields: [paymentProviderId], references: [id])
+  paymentProviderId String @map("payment_provider_id")
+  providerRef    String?  @map("provider_ref")
+  status         PaymentAttemptStatus @default(STARTED)
+  error          String?
+  createdAt      DateTime @default(now()) @map("created_at")
+  @@index([paymentIntentId, createdAt])
+  @@map("payment_attempts")
+}
+
+enum PaymentAttemptStatus {
+  STARTED
+  SUCCEEDED
+  FAILED
+  RETRYING
+  ABANDONED
+}
+
+model LedgerEntry {
+  id             String   @id @default(uuid())
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  organizationId String   @map("organization_id")
+  intentId       String?  @map("intent_id")
+  account        String   // e.g. cash:mpesa, clearing:bank
+  amountCents    Int      @map("amount_cents")
+  direction      LedgerDirection
+  currency       String   @default("KES")
+  metadata       Json?
+  createdAt      DateTime @default(now()) @map("created_at")
+  @@index([organizationId, createdAt])
+  @@map("ledger_entries")
+}
+
+enum LedgerDirection {
+  DEBIT
+  CREDIT
+}
+
+model AuditEvent {
+  id             String   @id @default(uuid())
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  organizationId String   @map("organization_id")
+  actorId        String?  @map("actor_id")
+  action         String
+  entityType     String?  @map("entity_type")
+  entityId       String?  @map("entity_id")
+  metadata       Json?
+  createdAt      DateTime @default(now()) @map("created_at")
+  @@index([organizationId, createdAt])
+  @@map("audit_events")
+}
+
+model ApiKey {
+  id             String   @id @default(uuid())
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  organizationId String   @map("organization_id")
+  name           String
+  hashedKey      String   @map("hashed_key")
+  createdAt      DateTime @default(now()) @map("created_at")
+  revokedAt      DateTime? @map("revoked_at")
+  @@map("api_keys")
+}
